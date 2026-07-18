@@ -4,6 +4,7 @@ import {
   createStableFindingId,
   type FeedSnapshot,
   type ManagedVulnerabilityFinding,
+  type VulnerabilityObservation,
 } from "@absolutejs/vulnerabilities";
 import {
   createPostgresVulnerabilityStore,
@@ -55,6 +56,19 @@ const finding = (
   tenantId: "tenant-1",
   vulnerabilityIds: ["CVE-2026-0001"],
 });
+
+const observation: VulnerabilityObservation = {
+  advisoryIds: ["CVE-2026-0001"],
+  assetId: "production-web-1",
+  componentId: "component-nginx",
+  contract: VULNERABILITY_CONTRACT_VERSION,
+  evidence: [],
+  id: "observation-1",
+  observedAt: timestamp,
+  scanner: "absolutejs-correlation",
+  scannerRecordId: "CVE-2026-0001",
+  severity: "high",
+};
 
 describe("Postgres feed snapshots", () => {
   test("round-trips cursor, provenance, records, and values", async () => {
@@ -128,6 +142,22 @@ describe("Postgres managed findings", () => {
   });
 });
 
+describe("Postgres vulnerability observations", () => {
+  test("upserts evidence and enforces tenant filters", async () => {
+    await store.observations.save("tenant-1", observation);
+    expect(await store.observations.get("tenant-1", observation.id)).toEqual(
+      observation,
+    );
+    expect(
+      await store.observations.list({
+        assetId: observation.assetId,
+        tenantId: "tenant-1",
+      }),
+    ).toEqual([observation]);
+    expect(await store.observations.list({ tenantId: "tenant-2" })).toEqual([]);
+  });
+});
+
 describe("Postgres refresh leases", () => {
   test("excludes competing owners until expiry and supports release", async () => {
     const now = new Date(timestamp);
@@ -165,6 +195,7 @@ describe("Postgres schema", () => {
     expect(sql).toContain("security_feed_snapshots");
     expect(sql).toContain("security_feed_sync_runs");
     expect(sql).toContain("security_findings");
+    expect(sql).toContain("security_observations");
     expect(sql).toContain("security_feed_leases");
     expect(() => vulnerabilityPostgresSchemaSql("bad-prefix")).toThrow(
       "invalid tablePrefix",

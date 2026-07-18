@@ -1,7 +1,7 @@
 {
   "name": "@absolutejs/vulnerabilities-postgres",
-  "version": "0.1.1",
-  "description": "Durable Postgres feed snapshots, sync history, managed findings, and refresh leases for AbsoluteJS vulnerability management.",
+  "version": "0.2.0",
+  "description": "Durable Postgres feed snapshots, sync history, findings, observations, and refresh leases for AbsoluteJS vulnerability management.",
   "type": "module",
   "license": "BSL-1.1",
   "author": "Alex Kahn",
@@ -53,7 +53,7 @@
   ],
   "dependencies": {
     "@absolutejs/manifest": "0.3.0",
-    "@absolutejs/vulnerabilities": "0.6.0",
+    "@absolutejs/vulnerabilities": "0.6.1",
     "@sinclair/typebox": "0.34.52"
   },
   "peerDependencies": {

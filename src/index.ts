@@ -1,5 +1,6 @@
 import {
   ManagedVulnerabilityFindingSchema,
+  VulnerabilityObservationSchema,
   type FeedCursor,
   type FeedSnapshot,
   type FeedSnapshotStore,
@@ -9,6 +10,9 @@ import {
   type ManagedFindingFilter,
   type ManagedFindingStore,
   type ManagedVulnerabilityFinding,
+  type VulnerabilityObservation,
+  type VulnerabilityObservationFilter,
+  type VulnerabilityObservationStore,
 } from "@absolutejs/vulnerabilities";
 import { Value } from "@sinclair/typebox/value";
 
@@ -41,6 +45,7 @@ export type PostgresVulnerabilityStore = {
   ensureSchema: () => Promise<void>;
   findings: ManagedFindingStore;
   leases: FeedLeaseStore;
+  observations: VulnerabilityObservationStore;
   snapshots: <T>() => FeedSnapshotStore<T>;
   syncRuns: FeedSyncRunStore;
 };
@@ -108,6 +113,7 @@ const normalizeCursor = (value: unknown): FeedCursor => {
 const prefixTables = (prefix: string) => ({
   findings: `${prefix}_findings`,
   leases: `${prefix}_feed_leases`,
+  observations: `${prefix}_observations`,
   records: `${prefix}_feed_records`,
   runs: `${prefix}_feed_sync_runs`,
   snapshots: `${prefix}_feed_snapshots`,
@@ -173,6 +179,20 @@ export const vulnerabilityPostgresSchemaSql = (
       ON ${table.findings} (tenant_id, severity, last_seen_at DESC);
     CREATE INDEX IF NOT EXISTS ${table.findings}_tenant_asset_idx
       ON ${table.findings} (tenant_id, asset_id, last_seen_at DESC);
+    CREATE TABLE IF NOT EXISTS ${table.observations} (
+      tenant_id text NOT NULL,
+      observation_id text NOT NULL,
+      asset_id text NOT NULL,
+      component_id text NOT NULL,
+      observed_at timestamptz NOT NULL,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant_id, observation_id)
+    );
+    CREATE INDEX IF NOT EXISTS ${table.observations}_tenant_asset_idx
+      ON ${table.observations} (tenant_id, asset_id, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS ${table.observations}_tenant_component_idx
+      ON ${table.observations} (tenant_id, component_id, observed_at DESC);
     CREATE TABLE IF NOT EXISTS ${table.leases} (
       feed_id text PRIMARY KEY,
       owner_id text NOT NULL,
@@ -463,6 +483,90 @@ export const createPostgresVulnerabilityStore = (
     saveMany: saveFindings,
   };
 
+  const parseObservation = (value: unknown) => {
+    const observation = json<VulnerabilityObservation>(
+      value,
+      "Vulnerability observation",
+    );
+    if (!Value.Check(VulnerabilityObservationSchema, observation))
+      throw new Error("Stored vulnerability observation is invalid");
+    return observation;
+  };
+
+  const saveObservations = async (
+    tenantId: string,
+    observations: readonly VulnerabilityObservation[],
+  ) => {
+    await ensureSchema();
+    const normalizedTenantId = requiredText(tenantId, "Tenant id");
+    if (observations.length === 0) return;
+    for (const observation of observations) {
+      const observationId = observation.id;
+      if (!Value.Check(VulnerabilityObservationSchema, observation))
+        throw new Error(
+          `Vulnerability observation ${observationId} is invalid`,
+        );
+    }
+    const payload = JSON.stringify(
+      observations.map((observation) => ({
+        asset_id: observation.assetId,
+        component_id: observation.componentId,
+        observation_id: observation.id,
+        observed_at: observation.observedAt,
+        value: observation,
+      })),
+    );
+    await sql`
+      INSERT INTO ${sql.unsafe(table.observations)} (
+        tenant_id, observation_id, asset_id, component_id, observed_at, value,
+        updated_at
+      )
+      SELECT
+        ${normalizedTenantId}, item.observation_id, item.asset_id,
+        item.component_id, item.observed_at::timestamptz, item.value, now()
+      FROM jsonb_to_recordset(${payload}::jsonb) AS item(
+        observation_id text, asset_id text, component_id text,
+        observed_at text, value jsonb
+      )
+      ON CONFLICT (tenant_id, observation_id) DO UPDATE SET
+        asset_id = EXCLUDED.asset_id,
+        component_id = EXCLUDED.component_id,
+        observed_at = EXCLUDED.observed_at,
+        value = EXCLUDED.value,
+        updated_at = now()
+    `;
+  };
+
+  const observations: VulnerabilityObservationStore = {
+    get: async (tenantId, observationId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.observations)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND observation_id = ${requiredText(observationId, "Observation id")}
+      `;
+      return rows[0] ? parseObservation(rows[0].value) : null;
+    },
+    list: async (filter: VulnerabilityObservationFilter) => {
+      await ensureSchema();
+      const tenantId = requiredText(filter.tenantId, "Tenant id");
+      const assetId = filter.assetId?.trim() || null;
+      const componentId = filter.componentId?.trim() || null;
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.observations)}
+        WHERE tenant_id = ${tenantId}
+          AND (${assetId}::text IS NULL OR asset_id = ${assetId})
+          AND (${componentId}::text IS NULL OR component_id = ${componentId})
+        ORDER BY observed_at DESC, observation_id
+        LIMIT ${limit(filter.limit)}
+      `;
+      return rows.map(({ value }) => parseObservation(value));
+    },
+    save: async (tenantId, observation) =>
+      saveObservations(tenantId, [observation]),
+    saveMany: saveObservations,
+  };
+
   const leases: FeedLeaseStore = {
     acquire: async (request) => {
       await ensureSchema();
@@ -501,5 +605,12 @@ export const createPostgresVulnerabilityStore = (
     },
   };
 
-  return { ensureSchema, findings, leases, snapshots, syncRuns };
+  return {
+    ensureSchema,
+    findings,
+    leases,
+    observations,
+    snapshots,
+    syncRuns,
+  };
 };
