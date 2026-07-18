@@ -2,6 +2,8 @@ import {
   ManagedVulnerabilityFindingSchema,
   VulnerabilityObservationSchema,
   VulnerabilityRiskAssessmentSchema,
+  VexDecisionSchema,
+  VexFindingApplicationSchema,
   type FeedCursor,
   type FeedSnapshot,
   type FeedSnapshotStore,
@@ -17,6 +19,11 @@ import {
   type VulnerabilityRiskAssessment,
   type VulnerabilityRiskAssessmentFilter,
   type VulnerabilityRiskAssessmentStore,
+  type VexDecision,
+  type VexDecisionFilter,
+  type VexDecisionStore,
+  type VexFindingApplication,
+  type VexFindingApplicationStore,
 } from "@absolutejs/vulnerabilities";
 import { Value } from "@sinclair/typebox/value";
 
@@ -53,6 +60,8 @@ export type PostgresVulnerabilityStore = {
   riskAssessments: VulnerabilityRiskAssessmentStore;
   snapshots: <T>() => FeedSnapshotStore<T>;
   syncRuns: FeedSyncRunStore;
+  vexApplications: VexFindingApplicationStore;
+  vexDecisions: VexDecisionStore;
 };
 
 export type CreatePostgresVulnerabilityStoreOptions = {
@@ -123,6 +132,8 @@ const prefixTables = (prefix: string) => ({
   records: `${prefix}_feed_records`,
   runs: `${prefix}_feed_sync_runs`,
   snapshots: `${prefix}_feed_snapshots`,
+  vexApplications: `${prefix}_vex_applications`,
+  vexDecisions: `${prefix}_vex_decisions`,
 });
 
 export const vulnerabilityPostgresSchemaSql = (
@@ -214,6 +225,34 @@ export const vulnerabilityPostgresSchemaSql = (
     CREATE INDEX IF NOT EXISTS ${table.riskAssessments}_tenant_due_idx
       ON ${table.riskAssessments} (tenant_id, remediate_by)
       WHERE remediate_by IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS ${table.vexDecisions} (
+      tenant_id text NOT NULL,
+      decision_id text NOT NULL,
+      product_id text NOT NULL,
+      vulnerability_id text NOT NULL,
+      status text NOT NULL,
+      created_at timestamptz NOT NULL,
+      expires_at timestamptz,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant_id, decision_id)
+    );
+    CREATE INDEX IF NOT EXISTS ${table.vexDecisions}_tenant_product_idx
+      ON ${table.vexDecisions} (tenant_id, product_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS ${table.vexDecisions}_tenant_vulnerability_idx
+      ON ${table.vexDecisions} (tenant_id, vulnerability_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS ${table.vexApplications} (
+      tenant_id text NOT NULL,
+      finding_id text NOT NULL,
+      decision_id text NOT NULL,
+      applied_at timestamptz NOT NULL,
+      ended_at timestamptz,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant_id, finding_id)
+    );
+    CREATE INDEX IF NOT EXISTS ${table.vexApplications}_tenant_decision_idx
+      ON ${table.vexApplications} (tenant_id, decision_id, applied_at DESC);
     CREATE TABLE IF NOT EXISTS ${table.leases} (
       feed_id text PRIMARY KEY,
       owner_id text NOT NULL,
@@ -671,6 +710,152 @@ export const createPostgresVulnerabilityStore = (
     saveMany: saveRiskAssessments,
   };
 
+  const parseVexDecision = (value: unknown) => {
+    const decision = json<VexDecision>(value, "VEX decision");
+    if (!Value.Check(VexDecisionSchema, decision))
+      throw new Error("Stored VEX decision is invalid");
+    return decision;
+  };
+
+  const saveVexDecisions = async (
+    tenantId: string,
+    decisions: readonly VexDecision[],
+  ) => {
+    await ensureSchema();
+    const normalizedTenantId = requiredText(tenantId, "Tenant id");
+    if (decisions.length === 0) return;
+    for (const decision of decisions) {
+      const decisionId = decision.id;
+      if (!Value.Check(VexDecisionSchema, decision))
+        throw new Error(`VEX decision ${decisionId} is invalid`);
+    }
+    const payload = JSON.stringify(
+      decisions.map((decision) => ({
+        created_at: decision.createdAt,
+        decision_id: decision.id,
+        expires_at: decision.expiresAt,
+        product_id: decision.productId,
+        status: decision.status,
+        value: decision,
+        vulnerability_id: decision.vulnerabilityId,
+      })),
+    );
+    await sql`
+      INSERT INTO ${sql.unsafe(table.vexDecisions)} (
+        tenant_id, decision_id, product_id, vulnerability_id, status,
+        created_at, expires_at, value, updated_at
+      )
+      SELECT
+        ${normalizedTenantId}, item.decision_id, item.product_id,
+        item.vulnerability_id, item.status, item.created_at::timestamptz,
+        item.expires_at::timestamptz, item.value, now()
+      FROM jsonb_to_recordset(${payload}::jsonb) AS item(
+        decision_id text, product_id text, vulnerability_id text, status text,
+        created_at text, expires_at text, value jsonb
+      )
+      ON CONFLICT (tenant_id, decision_id) DO UPDATE SET
+        product_id = EXCLUDED.product_id,
+        vulnerability_id = EXCLUDED.vulnerability_id,
+        status = EXCLUDED.status,
+        created_at = EXCLUDED.created_at,
+        expires_at = EXCLUDED.expires_at,
+        value = EXCLUDED.value,
+        updated_at = now()
+    `;
+  };
+
+  const vexDecisions: VexDecisionStore = {
+    get: async (tenantId, decisionId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.vexDecisions)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND decision_id = ${requiredText(decisionId, "Decision id")}
+      `;
+      return rows[0] ? parseVexDecision(rows[0].value) : null;
+    },
+    list: async (filter: VexDecisionFilter) => {
+      await ensureSchema();
+      const tenantId = requiredText(filter.tenantId, "Tenant id");
+      const productId = filter.productId?.trim() || null;
+      const vulnerabilityId = filter.vulnerabilityId?.trim() || null;
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.vexDecisions)}
+        WHERE tenant_id = ${tenantId}
+          AND (${productId}::text IS NULL OR product_id = ${productId})
+          AND (${vulnerabilityId}::text IS NULL OR vulnerability_id = ${vulnerabilityId})
+        ORDER BY created_at DESC, decision_id
+        LIMIT ${limit(filter.limit)}
+      `;
+      return rows.map(({ value }) => parseVexDecision(value));
+    },
+    save: async (tenantId, decision) => saveVexDecisions(tenantId, [decision]),
+    saveMany: saveVexDecisions,
+  };
+
+  const parseVexApplication = (value: unknown) => {
+    const application = json<VexFindingApplication>(value, "VEX application");
+    if (!Value.Check(VexFindingApplicationSchema, application))
+      throw new Error("Stored VEX application is invalid");
+    return application;
+  };
+
+  const saveVexApplications = async (
+    applications: readonly VexFindingApplication[],
+  ) => {
+    await ensureSchema();
+    if (applications.length === 0) return;
+    for (const application of applications) {
+      const findingId = application.findingId;
+      if (!Value.Check(VexFindingApplicationSchema, application))
+        throw new Error(`VEX application ${findingId} is invalid`);
+    }
+    const payload = JSON.stringify(
+      applications.map((application) => ({
+        applied_at: application.appliedAt,
+        decision_id: application.decisionId,
+        ended_at: application.endedAt,
+        finding_id: application.findingId,
+        tenant_id: application.tenantId,
+        value: application,
+      })),
+    );
+    await sql`
+      INSERT INTO ${sql.unsafe(table.vexApplications)} (
+        tenant_id, finding_id, decision_id, applied_at, ended_at, value,
+        updated_at
+      )
+      SELECT
+        item.tenant_id, item.finding_id, item.decision_id,
+        item.applied_at::timestamptz, item.ended_at::timestamptz,
+        item.value, now()
+      FROM jsonb_to_recordset(${payload}::jsonb) AS item(
+        tenant_id text, finding_id text, decision_id text, applied_at text,
+        ended_at text, value jsonb
+      )
+      ON CONFLICT (tenant_id, finding_id) DO UPDATE SET
+        decision_id = EXCLUDED.decision_id,
+        applied_at = EXCLUDED.applied_at,
+        ended_at = EXCLUDED.ended_at,
+        value = EXCLUDED.value,
+        updated_at = now()
+    `;
+  };
+
+  const vexApplications: VexFindingApplicationStore = {
+    get: async (tenantId, findingId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.vexApplications)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND finding_id = ${requiredText(findingId, "Finding id")}
+      `;
+      return rows[0] ? parseVexApplication(rows[0].value) : null;
+    },
+    save: async (application) => saveVexApplications([application]),
+    saveMany: saveVexApplications,
+  };
+
   const leases: FeedLeaseStore = {
     acquire: async (request) => {
       await ensureSchema();
@@ -717,5 +902,7 @@ export const createPostgresVulnerabilityStore = (
     riskAssessments,
     snapshots,
     syncRuns,
+    vexApplications,
+    vexDecisions,
   };
 };

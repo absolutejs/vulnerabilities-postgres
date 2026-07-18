@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 - 2026-07-18
+
+- Add tenant-scoped VEX decision and finding-application persistence.
+
 ## 0.1.0 - 2026-07-18
 
 - Add durable feed snapshots and atomic record replacement.

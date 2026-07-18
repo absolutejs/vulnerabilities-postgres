@@ -6,6 +6,8 @@ import {
   type ManagedVulnerabilityFinding,
   type VulnerabilityObservation,
   type VulnerabilityRiskAssessment,
+  type VexDecision,
+  type VexFindingApplication,
 } from "@absolutejs/vulnerabilities";
 import {
   createPostgresVulnerabilityStore,
@@ -84,6 +86,30 @@ const assessment: VulnerabilityRiskAssessment = {
   reachability: "reachable",
   reasons: ["kev_internet_exposed", "fix_available"],
   remediateBy: "2026-07-19T19:00:00Z",
+};
+const vexDecision: VexDecision = {
+  author: "security@example.com",
+  contract: VULNERABILITY_CONTRACT_VERSION,
+  createdAt: timestamp,
+  evidence: [],
+  expiresAt: null,
+  id: "vex-1",
+  justification: null,
+  productId: "production-web-1",
+  reviewedAt: null,
+  statement: "Investigation in progress.",
+  status: "under_investigation",
+  vulnerabilityId: "CVE-2026-0001",
+};
+const vexApplication: VexFindingApplication = {
+  appliedAt: timestamp,
+  contract: VULNERABILITY_CONTRACT_VERSION,
+  decisionId: vexDecision.id,
+  endedAt: null,
+  findingId,
+  previousStatus: "new",
+  resultingStatus: "under_investigation",
+  tenantId: "tenant-1",
 };
 
 describe("Postgres feed snapshots", () => {
@@ -192,6 +218,26 @@ describe("Postgres vulnerability risk assessments", () => {
   });
 });
 
+describe("Postgres VEX decisions", () => {
+  test("persists tenant-scoped decisions and finding applications", async () => {
+    await store.vexDecisions.save("tenant-1", vexDecision);
+    expect(await store.vexDecisions.get("tenant-1", vexDecision.id)).toEqual(
+      vexDecision,
+    );
+    expect(
+      await store.vexDecisions.list({
+        productId: vexDecision.productId,
+        tenantId: "tenant-1",
+      }),
+    ).toEqual([vexDecision]);
+    await store.vexApplications.save(vexApplication);
+    expect(await store.vexApplications.get("tenant-1", findingId)).toEqual(
+      vexApplication,
+    );
+    expect(await store.vexDecisions.list({ tenantId: "tenant-2" })).toEqual([]);
+  });
+});
+
 describe("Postgres refresh leases", () => {
   test("excludes competing owners until expiry and supports release", async () => {
     const now = new Date(timestamp);
@@ -231,6 +277,8 @@ describe("Postgres schema", () => {
     expect(sql).toContain("security_findings");
     expect(sql).toContain("security_observations");
     expect(sql).toContain("security_risk_assessments");
+    expect(sql).toContain("security_vex_decisions");
+    expect(sql).toContain("security_vex_applications");
     expect(sql).toContain("security_feed_leases");
     expect(() => vulnerabilityPostgresSchemaSql("bad-prefix")).toThrow(
       "invalid tablePrefix",
