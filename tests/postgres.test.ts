@@ -5,6 +5,7 @@ import {
   type FeedSnapshot,
   type ManagedVulnerabilityFinding,
   type VulnerabilityObservation,
+  type VulnerabilityRiskAssessment,
 } from "@absolutejs/vulnerabilities";
 import {
   createPostgresVulnerabilityStore,
@@ -68,6 +69,21 @@ const observation: VulnerabilityObservation = {
   scanner: "absolutejs-correlation",
   scannerRecordId: "CVE-2026-0001",
   severity: "high",
+};
+const assessment: VulnerabilityRiskAssessment = {
+  assessedAt: timestamp,
+  contract: VULNERABILITY_CONTRACT_VERSION,
+  epssPercentile: 0.97,
+  epssProbability: 0.31,
+  findingId,
+  fixAvailable: true,
+  internetExposed: true,
+  kev: true,
+  policyVersion: "absolutejs-risk-v1",
+  priority: "emergency",
+  reachability: "reachable",
+  reasons: ["kev_internet_exposed", "fix_available"],
+  remediateBy: "2026-07-19T19:00:00Z",
 };
 
 describe("Postgres feed snapshots", () => {
@@ -158,6 +174,24 @@ describe("Postgres vulnerability observations", () => {
   });
 });
 
+describe("Postgres vulnerability risk assessments", () => {
+  test("upserts assessments and filters tenant priorities", async () => {
+    await store.riskAssessments.save("tenant-1", assessment);
+    expect(await store.riskAssessments.get("tenant-1", findingId)).toEqual(
+      assessment,
+    );
+    expect(
+      await store.riskAssessments.list({
+        priority: "emergency",
+        tenantId: "tenant-1",
+      }),
+    ).toEqual([assessment]);
+    expect(await store.riskAssessments.list({ tenantId: "tenant-2" })).toEqual(
+      [],
+    );
+  });
+});
+
 describe("Postgres refresh leases", () => {
   test("excludes competing owners until expiry and supports release", async () => {
     const now = new Date(timestamp);
@@ -196,6 +230,7 @@ describe("Postgres schema", () => {
     expect(sql).toContain("security_feed_sync_runs");
     expect(sql).toContain("security_findings");
     expect(sql).toContain("security_observations");
+    expect(sql).toContain("security_risk_assessments");
     expect(sql).toContain("security_feed_leases");
     expect(() => vulnerabilityPostgresSchemaSql("bad-prefix")).toThrow(
       "invalid tablePrefix",

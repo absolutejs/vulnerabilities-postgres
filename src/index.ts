@@ -1,6 +1,7 @@
 import {
   ManagedVulnerabilityFindingSchema,
   VulnerabilityObservationSchema,
+  VulnerabilityRiskAssessmentSchema,
   type FeedCursor,
   type FeedSnapshot,
   type FeedSnapshotStore,
@@ -13,6 +14,9 @@ import {
   type VulnerabilityObservation,
   type VulnerabilityObservationFilter,
   type VulnerabilityObservationStore,
+  type VulnerabilityRiskAssessment,
+  type VulnerabilityRiskAssessmentFilter,
+  type VulnerabilityRiskAssessmentStore,
 } from "@absolutejs/vulnerabilities";
 import { Value } from "@sinclair/typebox/value";
 
@@ -46,6 +50,7 @@ export type PostgresVulnerabilityStore = {
   findings: ManagedFindingStore;
   leases: FeedLeaseStore;
   observations: VulnerabilityObservationStore;
+  riskAssessments: VulnerabilityRiskAssessmentStore;
   snapshots: <T>() => FeedSnapshotStore<T>;
   syncRuns: FeedSyncRunStore;
 };
@@ -114,6 +119,7 @@ const prefixTables = (prefix: string) => ({
   findings: `${prefix}_findings`,
   leases: `${prefix}_feed_leases`,
   observations: `${prefix}_observations`,
+  riskAssessments: `${prefix}_risk_assessments`,
   records: `${prefix}_feed_records`,
   runs: `${prefix}_feed_sync_runs`,
   snapshots: `${prefix}_feed_snapshots`,
@@ -193,6 +199,21 @@ export const vulnerabilityPostgresSchemaSql = (
       ON ${table.observations} (tenant_id, asset_id, observed_at DESC);
     CREATE INDEX IF NOT EXISTS ${table.observations}_tenant_component_idx
       ON ${table.observations} (tenant_id, component_id, observed_at DESC);
+    CREATE TABLE IF NOT EXISTS ${table.riskAssessments} (
+      tenant_id text NOT NULL,
+      finding_id text NOT NULL,
+      priority text NOT NULL,
+      assessed_at timestamptz NOT NULL,
+      remediate_by timestamptz,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant_id, finding_id)
+    );
+    CREATE INDEX IF NOT EXISTS ${table.riskAssessments}_tenant_priority_idx
+      ON ${table.riskAssessments} (tenant_id, priority, assessed_at DESC);
+    CREATE INDEX IF NOT EXISTS ${table.riskAssessments}_tenant_due_idx
+      ON ${table.riskAssessments} (tenant_id, remediate_by)
+      WHERE remediate_by IS NOT NULL;
     CREATE TABLE IF NOT EXISTS ${table.leases} (
       feed_id text PRIMARY KEY,
       owner_id text NOT NULL,
@@ -567,6 +588,89 @@ export const createPostgresVulnerabilityStore = (
     saveMany: saveObservations,
   };
 
+  const parseRiskAssessment = (value: unknown) => {
+    const assessment = json<VulnerabilityRiskAssessment>(
+      value,
+      "Vulnerability risk assessment",
+    );
+    if (!Value.Check(VulnerabilityRiskAssessmentSchema, assessment))
+      throw new Error("Stored vulnerability risk assessment is invalid");
+    return assessment;
+  };
+
+  const saveRiskAssessments = async (
+    tenantId: string,
+    assessments: readonly VulnerabilityRiskAssessment[],
+  ) => {
+    await ensureSchema();
+    const normalizedTenantId = requiredText(tenantId, "Tenant id");
+    if (assessments.length === 0) return;
+    for (const assessment of assessments) {
+      const findingId = assessment.findingId;
+      if (!Value.Check(VulnerabilityRiskAssessmentSchema, assessment))
+        throw new Error(
+          `Vulnerability risk assessment ${findingId} is invalid`,
+        );
+    }
+    const payload = JSON.stringify(
+      assessments.map((assessment) => ({
+        assessed_at: assessment.assessedAt,
+        finding_id: assessment.findingId,
+        priority: assessment.priority,
+        remediate_by: assessment.remediateBy,
+        value: assessment,
+      })),
+    );
+    await sql`
+      INSERT INTO ${sql.unsafe(table.riskAssessments)} (
+        tenant_id, finding_id, priority, assessed_at, remediate_by, value,
+        updated_at
+      )
+      SELECT
+        ${normalizedTenantId}, item.finding_id, item.priority,
+        item.assessed_at::timestamptz, item.remediate_by::timestamptz,
+        item.value, now()
+      FROM jsonb_to_recordset(${payload}::jsonb) AS item(
+        finding_id text, priority text, assessed_at text, remediate_by text,
+        value jsonb
+      )
+      ON CONFLICT (tenant_id, finding_id) DO UPDATE SET
+        priority = EXCLUDED.priority,
+        assessed_at = EXCLUDED.assessed_at,
+        remediate_by = EXCLUDED.remediate_by,
+        value = EXCLUDED.value,
+        updated_at = now()
+    `;
+  };
+
+  const riskAssessments: VulnerabilityRiskAssessmentStore = {
+    get: async (tenantId, findingId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.riskAssessments)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND finding_id = ${requiredText(findingId, "Finding id")}
+      `;
+      return rows[0] ? parseRiskAssessment(rows[0].value) : null;
+    },
+    list: async (filter: VulnerabilityRiskAssessmentFilter) => {
+      await ensureSchema();
+      const tenantId = requiredText(filter.tenantId, "Tenant id");
+      const priority = filter.priority ?? null;
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.riskAssessments)}
+        WHERE tenant_id = ${tenantId}
+          AND (${priority}::text IS NULL OR priority = ${priority})
+        ORDER BY assessed_at DESC, finding_id
+        LIMIT ${limit(filter.limit)}
+      `;
+      return rows.map(({ value }) => parseRiskAssessment(value));
+    },
+    save: async (tenantId, assessment) =>
+      saveRiskAssessments(tenantId, [assessment]),
+    saveMany: saveRiskAssessments,
+  };
+
   const leases: FeedLeaseStore = {
     acquire: async (request) => {
       await ensureSchema();
@@ -610,6 +714,7 @@ export const createPostgresVulnerabilityStore = (
     findings,
     leases,
     observations,
+    riskAssessments,
     snapshots,
     syncRuns,
   };

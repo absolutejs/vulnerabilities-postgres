@@ -10,7 +10,7 @@ export const manifest =
       intents: [
         "persist vulnerability intelligence",
         "retain vulnerability sync history",
-        "store managed vulnerability findings and observations",
+        "store managed vulnerability findings, observations, and risk assessments",
       ],
       keywords: ["vulnerabilities", "Postgres", "CVE", "feed-history"],
       protocols: ["PostgreSQL", "AbsoluteJS vulnerability contracts"],
@@ -19,7 +19,7 @@ export const manifest =
       accent: "#336791",
       category: "operations",
       description:
-        "Durable Postgres snapshots, records, sync history, managed findings, observations, and distributed refresh leases.",
+        "Durable Postgres snapshots, sync history, findings, observations, risk assessments, and distributed refresh leases.",
       docsUrl: "https://github.com/absolutejs/vulnerabilities-postgres",
       name: "@absolutejs/vulnerabilities-postgres",
       tagline: "Keep vulnerability intelligence durable and auditable.",
@@ -33,7 +33,7 @@ export const manifest =
           env: [
             {
               description:
-                "Postgres connection string for vulnerability intelligence, findings, and observations",
+                "Postgres connection string for vulnerability intelligence, findings, observations, and risk assessments",
               example: "postgres://user:pass@host/db",
               key: "DATABASE_URL",
               secret: true,
@@ -49,7 +49,7 @@ export const manifest =
           services: [
             {
               description:
-                "Stores vulnerability intelligence, history, findings, observations, and leases",
+                "Stores vulnerability intelligence, findings, observations, risk assessments, and leases",
               id: "postgres",
             },
           ],
