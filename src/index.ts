@@ -1,5 +1,8 @@
 import {
   ManagedVulnerabilityFindingSchema,
+  RemediationExecutionSchema,
+  RemediationPlanSchema,
+  RemediationVerificationSchema,
   VulnerabilityObservationSchema,
   VulnerabilityRiskAssessmentSchema,
   VexDecisionSchema,
@@ -13,6 +16,13 @@ import {
   type ManagedFindingFilter,
   type ManagedFindingStore,
   type ManagedVulnerabilityFinding,
+  type RemediationExecution,
+  type RemediationExecutionStore,
+  type RemediationPlan,
+  type RemediationPlanFilter,
+  type RemediationPlanStore,
+  type RemediationVerification,
+  type RemediationVerificationStore,
   type VulnerabilityObservation,
   type VulnerabilityObservationFilter,
   type VulnerabilityObservationStore,
@@ -57,6 +67,9 @@ export type PostgresVulnerabilityStore = {
   findings: ManagedFindingStore;
   leases: FeedLeaseStore;
   observations: VulnerabilityObservationStore;
+  remediationExecutions: RemediationExecutionStore;
+  remediationPlans: RemediationPlanStore;
+  remediationVerifications: RemediationVerificationStore;
   riskAssessments: VulnerabilityRiskAssessmentStore;
   snapshots: <T>() => FeedSnapshotStore<T>;
   syncRuns: FeedSyncRunStore;
@@ -128,6 +141,9 @@ const prefixTables = (prefix: string) => ({
   findings: `${prefix}_findings`,
   leases: `${prefix}_feed_leases`,
   observations: `${prefix}_observations`,
+  remediationExecutions: `${prefix}_remediation_executions`,
+  remediationPlans: `${prefix}_remediation_plans`,
+  remediationVerifications: `${prefix}_remediation_verifications`,
   riskAssessments: `${prefix}_risk_assessments`,
   records: `${prefix}_feed_records`,
   runs: `${prefix}_feed_sync_runs`,
@@ -225,6 +241,43 @@ export const vulnerabilityPostgresSchemaSql = (
     CREATE INDEX IF NOT EXISTS ${table.riskAssessments}_tenant_due_idx
       ON ${table.riskAssessments} (tenant_id, remediate_by)
       WHERE remediate_by IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS ${table.remediationPlans} (
+      tenant_id text NOT NULL,
+      plan_id text NOT NULL,
+      status text NOT NULL,
+      created_at timestamptz NOT NULL,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant_id, plan_id)
+    );
+    CREATE INDEX IF NOT EXISTS ${table.remediationPlans}_tenant_status_idx
+      ON ${table.remediationPlans} (tenant_id, status, created_at DESC);
+    CREATE TABLE IF NOT EXISTS ${table.remediationExecutions} (
+      tenant_id text NOT NULL,
+      execution_id text NOT NULL,
+      plan_id text NOT NULL,
+      status text NOT NULL,
+      started_at timestamptz NOT NULL,
+      completed_at timestamptz,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant_id, execution_id)
+    );
+    CREATE INDEX IF NOT EXISTS ${table.remediationExecutions}_tenant_plan_idx
+      ON ${table.remediationExecutions} (tenant_id, plan_id, started_at DESC);
+    CREATE TABLE IF NOT EXISTS ${table.remediationVerifications} (
+      tenant_id text NOT NULL,
+      verification_id text NOT NULL,
+      execution_id text NOT NULL,
+      plan_id text NOT NULL,
+      status text NOT NULL,
+      observed_at timestamptz NOT NULL,
+      value jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      PRIMARY KEY (tenant_id, verification_id)
+    );
+    CREATE INDEX IF NOT EXISTS ${table.remediationVerifications}_tenant_execution_idx
+      ON ${table.remediationVerifications} (tenant_id, execution_id, observed_at DESC);
     CREATE TABLE IF NOT EXISTS ${table.vexDecisions} (
       tenant_id text NOT NULL,
       decision_id text NOT NULL,
@@ -710,6 +763,174 @@ export const createPostgresVulnerabilityStore = (
     saveMany: saveRiskAssessments,
   };
 
+  const parseRemediationPlan = (value: unknown) => {
+    const plan = json<RemediationPlan>(value, "Remediation plan");
+    if (!Value.Check(RemediationPlanSchema, plan))
+      throw new Error("Stored remediation plan is invalid");
+    return plan;
+  };
+
+  const remediationPlans: RemediationPlanStore = {
+    get: async (tenantId, planId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.remediationPlans)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND plan_id = ${requiredText(planId, "Remediation plan id")}
+      `;
+      return rows[0] ? parseRemediationPlan(rows[0].value) : null;
+    },
+    list: async (filter: RemediationPlanFilter) => {
+      await ensureSchema();
+      const tenantId = requiredText(filter.tenantId, "Tenant id");
+      const status = filter.status ?? null;
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.remediationPlans)}
+        WHERE tenant_id = ${tenantId}
+          AND (${status}::text IS NULL OR status = ${status})
+        ORDER BY created_at DESC, plan_id
+        LIMIT ${limit(filter.limit)}
+      `;
+      return rows.map(({ value }) => parseRemediationPlan(value));
+    },
+    save: async (tenantId, plan) => {
+      await ensureSchema();
+      const planId = plan.id;
+      if (!Value.Check(RemediationPlanSchema, plan))
+        throw new Error(`Remediation plan ${planId} is invalid`);
+      await sql`
+        INSERT INTO ${sql.unsafe(table.remediationPlans)} (
+          tenant_id, plan_id, status, created_at, value, updated_at
+        ) VALUES (
+          ${requiredText(tenantId, "Tenant id")}, ${plan.id}, ${plan.status},
+          ${plan.createdAt}::timestamptz, ${JSON.stringify(plan)}::jsonb, now()
+        )
+        ON CONFLICT (tenant_id, plan_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          created_at = EXCLUDED.created_at,
+          value = EXCLUDED.value,
+          updated_at = now()
+      `;
+    },
+  };
+
+  const parseRemediationExecution = (value: unknown) => {
+    const execution = json<RemediationExecution>(
+      value,
+      "Remediation execution",
+    );
+    if (!Value.Check(RemediationExecutionSchema, execution))
+      throw new Error("Stored remediation execution is invalid");
+    return execution;
+  };
+
+  const remediationExecutions: RemediationExecutionStore = {
+    get: async (tenantId, executionId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.remediationExecutions)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND execution_id = ${requiredText(executionId, "Remediation execution id")}
+      `;
+      return rows[0] ? parseRemediationExecution(rows[0].value) : null;
+    },
+    list: async (tenantId, planId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.remediationExecutions)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND plan_id = ${requiredText(planId, "Remediation plan id")}
+        ORDER BY started_at DESC, execution_id
+        LIMIT 1000
+      `;
+      return rows.map(({ value }) => parseRemediationExecution(value));
+    },
+    save: async (tenantId, execution) => {
+      await ensureSchema();
+      const executionId = execution.id;
+      if (!Value.Check(RemediationExecutionSchema, execution))
+        throw new Error(`Remediation execution ${executionId} is invalid`);
+      await sql`
+        INSERT INTO ${sql.unsafe(table.remediationExecutions)} (
+          tenant_id, execution_id, plan_id, status, started_at, completed_at,
+          value, updated_at
+        ) VALUES (
+          ${requiredText(tenantId, "Tenant id")}, ${execution.id},
+          ${execution.planId}, ${execution.status},
+          ${execution.startedAt}::timestamptz,
+          ${execution.completedAt}::timestamptz,
+          ${JSON.stringify(execution)}::jsonb, now()
+        )
+        ON CONFLICT (tenant_id, execution_id) DO UPDATE SET
+          plan_id = EXCLUDED.plan_id,
+          status = EXCLUDED.status,
+          started_at = EXCLUDED.started_at,
+          completed_at = EXCLUDED.completed_at,
+          value = EXCLUDED.value,
+          updated_at = now()
+      `;
+    },
+  };
+
+  const parseRemediationVerification = (value: unknown) => {
+    const verification = json<RemediationVerification>(
+      value,
+      "Remediation verification",
+    );
+    if (!Value.Check(RemediationVerificationSchema, verification))
+      throw new Error("Stored remediation verification is invalid");
+    return verification;
+  };
+
+  const remediationVerifications: RemediationVerificationStore = {
+    get: async (tenantId, verificationId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.remediationVerifications)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND verification_id = ${requiredText(verificationId, "Remediation verification id")}
+      `;
+      return rows[0] ? parseRemediationVerification(rows[0].value) : null;
+    },
+    list: async (tenantId, executionId) => {
+      await ensureSchema();
+      const rows = await sql<{ value: unknown }>`
+        SELECT value FROM ${sql.unsafe(table.remediationVerifications)}
+        WHERE tenant_id = ${requiredText(tenantId, "Tenant id")}
+          AND execution_id = ${requiredText(executionId, "Remediation execution id")}
+        ORDER BY observed_at DESC, verification_id
+        LIMIT 1000
+      `;
+      return rows.map(({ value }) => parseRemediationVerification(value));
+    },
+    save: async (tenantId, verification) => {
+      await ensureSchema();
+      const verificationId = verification.id;
+      if (!Value.Check(RemediationVerificationSchema, verification))
+        throw new Error(
+          `Remediation verification ${verificationId} is invalid`,
+        );
+      await sql`
+        INSERT INTO ${sql.unsafe(table.remediationVerifications)} (
+          tenant_id, verification_id, execution_id, plan_id, status,
+          observed_at, value, updated_at
+        ) VALUES (
+          ${requiredText(tenantId, "Tenant id")}, ${verification.id},
+          ${verification.executionId}, ${verification.planId},
+          ${verification.status}, ${verification.observedAt}::timestamptz,
+          ${JSON.stringify(verification)}::jsonb, now()
+        )
+        ON CONFLICT (tenant_id, verification_id) DO UPDATE SET
+          execution_id = EXCLUDED.execution_id,
+          plan_id = EXCLUDED.plan_id,
+          status = EXCLUDED.status,
+          observed_at = EXCLUDED.observed_at,
+          value = EXCLUDED.value,
+          updated_at = now()
+      `;
+    },
+  };
+
   const parseVexDecision = (value: unknown) => {
     const decision = json<VexDecision>(value, "VEX decision");
     if (!Value.Check(VexDecisionSchema, decision))
@@ -899,6 +1120,9 @@ export const createPostgresVulnerabilityStore = (
     findings,
     leases,
     observations,
+    remediationExecutions,
+    remediationPlans,
+    remediationVerifications,
     riskAssessments,
     snapshots,
     syncRuns,

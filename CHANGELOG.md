@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0 - 2026-07-18
+
+- Add tenant-scoped remediation plan, execution, and verification persistence.
+
 ## 0.4.0 - 2026-07-18
 
 - Add tenant-scoped VEX decision and finding-application persistence.

@@ -4,6 +4,9 @@ import {
   createStableFindingId,
   type FeedSnapshot,
   type ManagedVulnerabilityFinding,
+  type RemediationExecution,
+  type RemediationPlan,
+  type RemediationVerification,
   type VulnerabilityObservation,
   type VulnerabilityRiskAssessment,
   type VexDecision,
@@ -110,6 +113,64 @@ const vexApplication: VexFindingApplication = {
   previousStatus: "new",
   resultingStatus: "under_investigation",
   tenantId: "tenant-1",
+};
+const remediationPlan: RemediationPlan = {
+  actions: [
+    {
+      assetId: "production-web-1",
+      componentId: "component-nginx",
+      fromVersion: "release-1",
+      id: "action-1",
+      kind: "rebuild",
+      requiresRestart: true,
+      toVersion: "release-2",
+    },
+  ],
+  approvedAt: timestamp,
+  approvedBy: "operator-1",
+  contract: VULNERABILITY_CONTRACT_VERSION,
+  createdAt: timestamp,
+  createdBy: "security-team",
+  findingIds: [findingId],
+  id: "plan-1",
+  rollbackSummary: "Restore release-1.",
+  status: "succeeded",
+};
+const remediationExecution: RemediationExecution = {
+  completedAt: "2026-07-18T20:00:00Z",
+  contract: VULNERABILITY_CONTRACT_VERSION,
+  evidence: [],
+  id: "execution-1",
+  message: "Release activated.",
+  planId: remediationPlan.id,
+  startedAt: timestamp,
+  status: "succeeded",
+};
+const remediationVerification: RemediationVerification = {
+  contract: VULNERABILITY_CONTRACT_VERSION,
+  deployments: [
+    {
+      activatedAt: "2026-07-18T20:00:00Z",
+      assetId: "production-web-1",
+      releaseId: "release-2",
+    },
+  ],
+  evidence: [
+    {
+      collectedAt: "2026-07-18T21:00:00Z",
+      digest: null,
+      kind: "verification",
+      source: "absolutejs-inventory",
+      uri: null,
+    },
+  ],
+  executionId: remediationExecution.id,
+  fixedFindingIds: [findingId],
+  id: "verification-1",
+  observedAt: "2026-07-18T21:00:00Z",
+  planId: remediationPlan.id,
+  remainingFindingIds: [],
+  status: "passed",
 };
 
 describe("Postgres feed snapshots", () => {
@@ -238,6 +299,35 @@ describe("Postgres VEX decisions", () => {
   });
 });
 
+describe("Postgres remediation lifecycle", () => {
+  test("persists tenant-scoped plans, executions, and verifications", async () => {
+    await store.remediationPlans.save("tenant-1", remediationPlan);
+    await store.remediationExecutions.save("tenant-1", remediationExecution);
+    await store.remediationVerifications.save(
+      "tenant-1",
+      remediationVerification,
+    );
+    expect(
+      await store.remediationPlans.list({
+        status: "succeeded",
+        tenantId: "tenant-1",
+      }),
+    ).toEqual([remediationPlan]);
+    expect(
+      await store.remediationExecutions.list("tenant-1", remediationPlan.id),
+    ).toEqual([remediationExecution]);
+    expect(
+      await store.remediationVerifications.list(
+        "tenant-1",
+        remediationExecution.id,
+      ),
+    ).toEqual([remediationVerification]);
+    expect(await store.remediationPlans.list({ tenantId: "tenant-2" })).toEqual(
+      [],
+    );
+  });
+});
+
 describe("Postgres refresh leases", () => {
   test("excludes competing owners until expiry and supports release", async () => {
     const now = new Date(timestamp);
@@ -277,6 +367,9 @@ describe("Postgres schema", () => {
     expect(sql).toContain("security_findings");
     expect(sql).toContain("security_observations");
     expect(sql).toContain("security_risk_assessments");
+    expect(sql).toContain("security_remediation_plans");
+    expect(sql).toContain("security_remediation_executions");
+    expect(sql).toContain("security_remediation_verifications");
     expect(sql).toContain("security_vex_decisions");
     expect(sql).toContain("security_vex_applications");
     expect(sql).toContain("security_feed_leases");
