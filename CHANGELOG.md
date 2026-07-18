@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 - 2026-07-18
+
+- Consume exact-release remediation verification from vulnerability core 0.8.1.
+
 ## 0.5.0 - 2026-07-18
 
 - Add tenant-scoped remediation plan, execution, and verification persistence.
