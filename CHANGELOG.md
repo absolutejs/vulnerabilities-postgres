@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3 - 2026-07-18
+
+- Verify durable feed, VEX, risk, and remediation stores against
+  `@absolutejs/vulnerabilities@0.10.0`.
+
 ## 0.5.1 - 2026-07-18
 
 - Consume exact-release remediation verification from vulnerability core 0.8.1.
