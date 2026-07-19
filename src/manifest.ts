@@ -10,7 +10,7 @@ export const manifest =
       intents: [
         "persist vulnerability intelligence",
         "retain vulnerability sync history",
-        "store managed vulnerability findings, VEX decisions, remediation evidence, and risk assessments",
+        "store managed vulnerability findings, alert incidents, policy history, notification deliveries, VEX decisions, remediation evidence, and risk assessments",
       ],
       keywords: ["vulnerabilities", "Postgres", "CVE", "feed-history"],
       protocols: ["PostgreSQL", "AbsoluteJS vulnerability contracts"],
@@ -19,7 +19,7 @@ export const manifest =
       accent: "#336791",
       category: "operations",
       description:
-        "Durable Postgres snapshots, findings, VEX decisions, remediation evidence, risk assessments, and distributed refresh leases.",
+        "Durable Postgres snapshots, findings, alert policy history, incident timelines, notification deliveries, remediation evidence, and risk assessments.",
       docsUrl: "https://github.com/absolutejs/vulnerabilities-postgres",
       name: "@absolutejs/vulnerabilities-postgres",
       tagline: "Keep vulnerability intelligence durable and auditable.",

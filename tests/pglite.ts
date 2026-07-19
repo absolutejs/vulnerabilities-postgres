@@ -34,5 +34,16 @@ export const makePgliteTag = (): { db: PGlite; sql: PostgresTag } => {
     };
     return fragment as unknown as ReturnType<PostgresTag["unsafe"]>;
   };
+  tag.begin = async (callback) => {
+    await db.exec("BEGIN");
+    try {
+      const result = await callback(tag);
+      await db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      await db.exec("ROLLBACK");
+      throw error;
+    }
+  };
   return { db, sql: tag };
 };

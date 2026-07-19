@@ -36,11 +36,17 @@ import {
   type VexFindingApplicationStore,
 } from "@absolutejs/vulnerabilities";
 import { Value } from "@sinclair/typebox/value";
+import {
+  createPostgresVulnerabilityAlertStores,
+  vulnerabilityAlertPostgresSchemaSql,
+  type AlertPostgresTag,
+  type VulnerabilityAlertIncidentStore,
+  type VulnerabilityAlertPolicyStore,
+} from "./alerts";
 
-export type PostgresTag = {
-  (strings: TemplateStringsArray, ...values: never[]): PromiseLike<unknown[]>;
-  unsafe: (sql: string, ...args: never[]) => PromiseLike<unknown[]>;
-};
+export * from "./alerts";
+
+export type PostgresTag = AlertPostgresTag;
 
 type SqlTag = {
   <T = unknown>(
@@ -63,6 +69,8 @@ export type FeedLeaseStore = {
 };
 
 export type PostgresVulnerabilityStore = {
+  alertIncidents: VulnerabilityAlertIncidentStore;
+  alertPolicies: VulnerabilityAlertPolicyStore;
   ensureSchema: () => Promise<void>;
   findings: ManagedFindingStore;
   leases: FeedLeaseStore;
@@ -160,7 +168,7 @@ export const vulnerabilityPostgresSchemaSql = (
       `[vulnerabilities-postgres] invalid tablePrefix "${tablePrefix}"; must match ${IDENTIFIER.source}`,
     );
   const table = prefixTables(tablePrefix);
-  return `
+  return `${vulnerabilityAlertPostgresSchemaSql(tablePrefix)}
     CREATE TABLE IF NOT EXISTS ${table.snapshots} (
       feed_id text PRIMARY KEY,
       feed_name text NOT NULL,
@@ -323,6 +331,11 @@ export const createPostgresVulnerabilityStore = (
   const table = prefixTables(tablePrefix);
   const sql = options.sql as unknown as SqlTag;
   const shouldEnsureSchema = options.ensureSchema ?? true;
+  const alertStores = createPostgresVulnerabilityAlertStores({
+    ensureSchema: shouldEnsureSchema,
+    sql: options.sql,
+    tablePrefix,
+  });
   let schemaPromise: Promise<void> | undefined;
   const ensureSchema = () => {
     if (!shouldEnsureSchema) return Promise.resolve();
@@ -1116,6 +1129,8 @@ export const createPostgresVulnerabilityStore = (
   };
 
   return {
+    alertIncidents: alertStores.alertIncidents,
+    alertPolicies: alertStores.alertPolicies,
     ensureSchema,
     findings,
     leases,

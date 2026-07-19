@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
+  DEFAULT_VULNERABILITY_ALERT_CONFIGURATION,
   VULNERABILITY_CONTRACT_VERSION,
   createStableFindingId,
   type FeedSnapshot,
@@ -9,6 +10,7 @@ import {
   type RemediationVerification,
   type VulnerabilityObservation,
   type VulnerabilityRiskAssessment,
+  type VulnerabilityAlert,
   type VexDecision,
   type VexFindingApplication,
 } from "@absolutejs/vulnerabilities";
@@ -376,5 +378,100 @@ describe("Postgres schema", () => {
     expect(() => vulnerabilityPostgresSchemaSql("bad-prefix")).toThrow(
       "invalid tablePrefix",
     );
+  });
+});
+
+describe("Postgres vulnerability alert lifecycle", () => {
+  const tenantId = "tenant-1";
+  const actorId = "00000000-0000-4000-8000-000000000001";
+  const alert: VulnerabilityAlert = {
+    assetId: "project-1",
+    body: "A reachable critical vulnerability requires remediation.",
+    dueAt: "2026-07-19T19:00:00Z",
+    findingId,
+    fingerprint: "critical-finding",
+    id: "alert-critical-finding",
+    kind: "remediation_plan_overdue",
+    observedAt: timestamp,
+    planId: null,
+    severity: "critical",
+    sourceId: findingId,
+    tenantId,
+    title: "Critical vulnerability requires remediation",
+  };
+
+  test("versions policy and runs durable delivery, acknowledgement, resolution, and recurrence transitions", async () => {
+    const first = await store.alertPolicies.activate({
+      activatedAt: timestamp,
+      activatedBy: actorId,
+      configuration: structuredClone(DEFAULT_VULNERABILITY_ALERT_CONFIGURATION),
+      reason: "Initial managed policy",
+      tenantId,
+    });
+    const second = await store.alertPolicies.activate({
+      activatedAt: "2026-07-18T20:00:00Z",
+      activatedBy: actorId,
+      configuration: structuredClone(DEFAULT_VULNERABILITY_ALERT_CONFIGURATION),
+      reason: "Reviewed escalation policy",
+      tenantId,
+    });
+    expect([first.version, second.version]).toEqual([1, 2]);
+    expect(
+      (await store.alertPolicies.list()).map(({ status }) => status),
+    ).toEqual(["active", "superseded"]);
+
+    expect(await store.alertIncidents.observe({ alert, policy: second })).toBe(
+      "opened",
+    );
+    expect(await store.alertIncidents.observe({ alert, policy: second })).toBe(
+      "observed",
+    );
+    expect((await store.alertIncidents.incidents())[0]?.observation_count).toBe(
+      2,
+    );
+    expect(await store.alertIncidents.deliveries()).toHaveLength(1);
+
+    const [delivery] = await store.alertIncidents.claimDeliveries();
+    expect(delivery?.audience).toBe("owner");
+    expect(
+      await store.alertIncidents.completeDelivery({
+        alertId: alert.id,
+        audience: "owner",
+        deliveryId: delivery!.id,
+        kind: "opened",
+      }),
+    ).toBe(true);
+    expect(
+      await store.alertIncidents.acknowledge({
+        acknowledgedAt: "2026-07-18T20:30:00Z",
+        acknowledgedBy: actorId,
+        alertId: alert.id,
+      }),
+    ).toBe(true);
+    expect(
+      await store.alertIncidents.acknowledge({
+        acknowledgedAt: "2026-07-18T20:31:00Z",
+        acknowledgedBy: actorId,
+        alertId: alert.id,
+      }),
+    ).toBe(false);
+
+    const policies = new Map([[tenantId, second]]);
+    expect(
+      await store.alertIncidents.resolveInactive({
+        activeAlertIds: new Set(),
+        policies,
+        resolvedAt: "2026-07-18T21:00:00Z",
+      }),
+    ).toBe(1);
+    expect(await store.alertIncidents.observe({ alert, policy: second })).toBe(
+      "reopened",
+    );
+    const incident = (await store.alertIncidents.incidents())[0];
+    expect(incident?.occurrence_count).toBe(2);
+    expect(incident?.status).toBe("open");
+    expect(
+      (await store.alertIncidents.events()).map(({ kind }) => kind),
+    ).toEqual(["opened", "resolved", "acknowledged", "delivered", "opened"]);
   });
 });

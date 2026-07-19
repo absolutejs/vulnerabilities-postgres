@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - 2026-07-18
+
+- Add immutable tenant alert-policy version persistence.
+- Add atomic alert incident observation, acknowledgement, escalation,
+  resolution, and recurrence transitions.
+- Add durable event history and idempotent, leased notification delivery queues.
+- Export the alert schema and package-owned read models used by admin consoles.
+
 ## 0.5.3 - 2026-07-18
 
 - Verify durable feed, VEX, risk, and remediation stores against
