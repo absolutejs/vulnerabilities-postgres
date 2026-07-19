@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 - 2026-07-18
+
+- Preserve nullable versions for built-in alert policies and allow lifecycle
+  processing to use an explicit fallback policy for inactive tenants.
+
 ## 0.6.0 - 2026-07-18
 
 - Add immutable tenant alert-policy version persistence.

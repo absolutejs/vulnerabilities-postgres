@@ -27,7 +27,7 @@ export type VulnerabilityAlertPolicyVersion = {
 export type ActiveVulnerabilityAlertPolicy = {
   configuration: VulnerabilityAlertConfiguration;
   tenantId: string;
-  version: number;
+  version: number | null;
 };
 
 export type VulnerabilityAlertIncidentRow = {
@@ -149,11 +149,13 @@ export type VulnerabilityAlertIncidentStore = {
     observedAt?: string;
   }) => Promise<"observed" | "opened" | "reopened">;
   processEscalations: (input: {
+    fallbackPolicy?: ActiveVulnerabilityAlertPolicy;
     policies: ReadonlyMap<string, ActiveVulnerabilityAlertPolicy>;
     tenantIds?: readonly string[];
   }) => Promise<number>;
   resolveInactive: (input: {
     activeAlertIds: ReadonlySet<string>;
+    fallbackPolicy?: ActiveVulnerabilityAlertPolicy;
     policies: ReadonlyMap<string, ActiveVulnerabilityAlertPolicy>;
     resolvedAt?: string;
     tenantIds?: readonly string[];
@@ -473,7 +475,7 @@ export const createPostgresVulnerabilityAlertStores = (options: {
       >;
     },
     observe,
-    processEscalations: async ({ policies, tenantIds }) => {
+    processEscalations: async ({ fallbackPolicy, policies, tenantIds }) => {
       await ready();
       const tenants = tenantPredicate(tenantIds);
       const due = await sql<
@@ -488,7 +490,7 @@ export const createPostgresVulnerabilityAlertStores = (options: {
       >`SELECT alert_id, asset_id, occurrence_count, severity, tenant_id FROM ${sql.unsafe(table.incidents)} WHERE status = 'open' AND next_escalation_at <= now() AND (${tenants}::jsonb IS NULL OR tenant_id IN (SELECT jsonb_array_elements_text(${tenants}::jsonb)))`;
       let processed = 0;
       for (const incident of due) {
-        const policy = policies.get(incident.tenant_id);
+        const policy = policies.get(incident.tenant_id) ?? fallbackPolicy;
         if (!policy) continue;
         const changed = await transaction(sql, async (tx) => {
           const claimed =
@@ -514,6 +516,7 @@ export const createPostgresVulnerabilityAlertStores = (options: {
     },
     resolveInactive: async ({
       activeAlertIds,
+      fallbackPolicy,
       policies,
       resolvedAt,
       tenantIds,
@@ -534,7 +537,7 @@ export const createPostgresVulnerabilityAlertStores = (options: {
       let processed = 0;
       for (const incident of open) {
         if (activeAlertIds.has(incident.alert_id)) continue;
-        const policy = policies.get(incident.tenant_id);
+        const policy = policies.get(incident.tenant_id) ?? fallbackPolicy;
         if (!policy) continue;
         const changed = await transaction(sql, async (tx) => {
           const resolved =
