@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2 - 2026-07-18
+
+- Export a typed alert-policy validation error so applications can distinguish
+  invalid operator input from database failures.
+
 ## 0.6.1 - 2026-07-18
 
 - Preserve nullable versions for built-in alert policies and allow lifecycle

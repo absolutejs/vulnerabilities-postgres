@@ -15,6 +15,7 @@ import {
   type VexFindingApplication,
 } from "@absolutejs/vulnerabilities";
 import {
+  VulnerabilityAlertValidationError,
   createPostgresVulnerabilityStore,
   vulnerabilityPostgresSchemaSql,
 } from "../src";
@@ -401,6 +402,17 @@ describe("Postgres vulnerability alert lifecycle", () => {
   };
 
   test("versions policy and runs durable delivery, acknowledgement, resolution, and recurrence transitions", async () => {
+    await expect(
+      store.alertPolicies.activate({
+        activatedAt: timestamp,
+        activatedBy: actorId,
+        configuration: structuredClone(
+          DEFAULT_VULNERABILITY_ALERT_CONFIGURATION,
+        ),
+        reason: " ",
+        tenantId,
+      }),
+    ).rejects.toBeInstanceOf(VulnerabilityAlertValidationError);
     const first = await store.alertPolicies.activate({
       activatedAt: timestamp,
       activatedBy: actorId,

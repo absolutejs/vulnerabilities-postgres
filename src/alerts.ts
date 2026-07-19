@@ -101,6 +101,7 @@ export type ClaimedVulnerabilityAlertDelivery =
 
 export class VulnerabilityAlertConflictError extends Error {}
 export class VulnerabilityAlertNotFoundError extends Error {}
+export class VulnerabilityAlertValidationError extends Error {}
 
 export type VulnerabilityAlertPolicyStore = {
   activate: (input: {
@@ -318,11 +319,21 @@ export const createPostgresVulnerabilityAlertStores = (options: {
   const alertPolicies: VulnerabilityAlertPolicyStore = {
     activate: async (input) => {
       await ready();
-      const configuration = validateVulnerabilityAlertConfiguration(
-        input.configuration,
-      );
+      let configuration: VulnerabilityAlertConfiguration;
+      try {
+        configuration = validateVulnerabilityAlertConfiguration(
+          input.configuration,
+        );
+      } catch (error) {
+        throw new VulnerabilityAlertValidationError(
+          error instanceof Error ? error.message : "Policy is invalid",
+        );
+      }
       const reason = input.reason.trim();
-      if (!reason) throw new Error("Policy activation reason is required");
+      if (!reason)
+        throw new VulnerabilityAlertValidationError(
+          "Policy activation reason is required",
+        );
       return transaction(sql, async (tx) => {
         await tx`SELECT pg_advisory_xact_lock(hashtext(${`vulnerability-alert-policy:${input.tenantId}`}))`;
         const [latest] = await tx<{

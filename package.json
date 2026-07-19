@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/vulnerabilities-postgres",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Durable Postgres feeds, findings, alert incidents, policy history, delivery queues, remediation evidence, and risk assessments for AbsoluteJS vulnerability management.",
   "type": "module",
   "license": "BSL-1.1",
