@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0 - 2026-07-19
+
+- Accept and retain the 0.14 evidence witness operational alert kinds through
+  the existing durable incident, escalation, resolution, and delivery stores.
+
 ## 0.6.2 - 2026-07-18
 
 - Export a typed alert-policy validation error so applications can distinguish
