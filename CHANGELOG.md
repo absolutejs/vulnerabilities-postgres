@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0 - 2026-07-23
+
+- Export package-owned Drizzle schemas and lifecycle stores for vulnerability
+  alert policies, incidents, events, and leased deliveries.
+- Preserve atomic recurrence, escalation, resolution, acknowledgment,
+  idempotent routing, and `FOR UPDATE SKIP LOCKED` delivery claims without a
+  tagged-template SQL client.
+- Encode JSONB through typed database expressions for Bun SQL and Drizzle RC
+  compatibility.
+
 ## 0.7.0 - 2026-07-19
 
 - Accept and retain the 0.14 evidence witness operational alert kinds through

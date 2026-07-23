@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/vulnerabilities-postgres",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Durable Postgres feeds, findings, alert incidents, policy history, delivery queues, remediation evidence, and risk assessments for AbsoluteJS vulnerability management.",
   "type": "module",
   "license": "BSL-1.1",
@@ -41,7 +41,7 @@
     "format": "prettier --write \"./**/*.{ts,json,md}\"",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --target=bun --external @absolutejs/manifest --external @absolutejs/vulnerabilities --external @sinclair/typebox --external postgres --external @neondatabase/serverless && tsc -p tsconfig.build.json && absolute-manifest emit",
+    "build": "rm -rf dist && bun build src/index.ts src/manifest.ts --outdir dist --target=bun --external @absolutejs/manifest --external @absolutejs/vulnerabilities --external @sinclair/typebox --external drizzle-orm --external 'drizzle-orm/*' --external postgres --external @neondatabase/serverless && tsc -p tsconfig.build.json && absolute-manifest emit",
     "check:package": "bun run format && bun run typecheck && bun run test && bun run build"
   },
   "keywords": [
@@ -54,7 +54,8 @@
   "dependencies": {
     "@absolutejs/manifest": "0.3.0",
     "@absolutejs/vulnerabilities": ">=0.14.0 <0.15.0",
-    "@sinclair/typebox": "0.34.52"
+    "@sinclair/typebox": "0.34.52",
+    "drizzle-orm": "1.0.0-rc.4"
   },
   "peerDependencies": {
     "@neondatabase/serverless": ">=0.10.0",

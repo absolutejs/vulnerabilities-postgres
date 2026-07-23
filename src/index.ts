@@ -45,6 +45,7 @@ import {
 } from "./alerts";
 
 export * from "./alerts";
+export * from "./drizzle";
 
 export type PostgresTag = AlertPostgresTag;
 

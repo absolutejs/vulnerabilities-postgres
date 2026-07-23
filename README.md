@@ -15,6 +15,28 @@ const alertPolicies = persistence.alertPolicies;
 const alertIncidents = persistence.alertIncidents;
 ```
 
+Applications already using Drizzle can keep the complete alert lifecycle
+schema-derived:
+
+```ts
+import {
+  createDrizzleVulnerabilityAlertStores,
+  vulnerabilityAlertDrizzleSchema,
+} from "@absolutejs/vulnerabilities-postgres";
+import { drizzle } from "drizzle-orm/bun-sql";
+
+export const schema = {
+  ...vulnerabilityAlertDrizzleSchema,
+  // ...the rest of your application's tables
+};
+const db = drizzle({ client: sql });
+const { alertIncidents, alertPolicies } =
+  createDrizzleVulnerabilityAlertStores(db);
+```
+
+The Drizzle store targets the standard `vulnerability_*` tables. Custom table
+prefixes remain available through `createPostgresVulnerabilityStore`.
+
 The package stores complete provider snapshots and records, appendable sync
 history, tenant-scoped managed findings, correlation observations, VEX decisions
 and applications, remediation plans and evidence, risk assessments, immutable
