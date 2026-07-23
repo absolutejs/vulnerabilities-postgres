@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.0 - 2026-07-23
+
+- Export the complete package-owned Drizzle schema and
+  `createDrizzleVulnerabilityStore(db)` for feeds, records, sync history,
+  leases, findings, observations, risk, remediation, VEX, and alerts.
+- Preserve atomic snapshot replacement, tenant filters, validation, lease
+  fencing, and native JSONB without a tagged-template SQL client.
+- Add PostgreSQL-semantic Drizzle conformance for replacement, filtering,
+  leases, and physical JSONB types.
+
 ## 0.8.0 - 2026-07-23
 
 - Export package-owned Drizzle schemas and lifecycle stores for vulnerability

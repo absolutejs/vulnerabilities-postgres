@@ -25,6 +25,37 @@ export const manifest =
       tagline: "Keep vulnerability intelligence durable and auditable.",
     },
     implements: [
+      defineImplementation<never>()({
+        contract: "vulnerabilities/persistence",
+        factory: "createDrizzleVulnerabilityStore",
+        from: "@absolutejs/vulnerabilities-postgres",
+        requires: {
+          peers: [
+            {
+              name: "drizzle-orm",
+              range: ">=1.0.0-rc.4",
+              reason: "Schema-derived Postgres persistence",
+            },
+          ],
+          services: [
+            {
+              description:
+                "Stores the complete vulnerability intelligence and remediation lifecycle through the application's Drizzle database",
+              id: "postgres",
+            },
+          ],
+        },
+        title: "Drizzle Postgres (application-managed schema)",
+        wiring: {
+          code: "createDrizzleVulnerabilityStore(db)",
+          imports: [
+            {
+              from: "@absolutejs/vulnerabilities-postgres",
+              names: ["createDrizzleVulnerabilityStore"],
+            },
+          ],
+        },
+      }),
       defineImplementation<CreatePostgresVulnerabilityStoreOptions>()({
         contract: "vulnerabilities/persistence",
         factory: "createPostgresVulnerabilityStore",
@@ -84,6 +115,17 @@ export const manifest =
           ],
         },
       }),
+    ],
+    lifecycle: [
+      {
+        docsUrl: "https://github.com/absolutejs/vulnerabilities-postgres",
+        id: "migrate",
+        idempotent: true,
+        kind: "migration",
+        title:
+          "Import the package-owned vulnerability Drizzle tables into your application schema, then apply the migration",
+        when: "before-first-run",
+      },
     ],
     settings: Type.Object({}),
     wiring: [],
