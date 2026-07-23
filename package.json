@@ -1,6 +1,6 @@
 {
   "name": "@absolutejs/vulnerabilities-postgres",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Durable Postgres feeds, findings, alert incidents, policy history, delivery queues, remediation evidence, and risk assessments for AbsoluteJS vulnerability management.",
   "type": "module",
   "license": "BSL-1.1",
@@ -54,12 +54,12 @@
   "dependencies": {
     "@absolutejs/manifest": "0.3.0",
     "@absolutejs/vulnerabilities": ">=0.14.0 <0.15.0",
-    "@sinclair/typebox": "0.34.52",
-    "drizzle-orm": "1.0.0-rc.4"
+    "@sinclair/typebox": "0.34.52"
   },
   "peerDependencies": {
     "@neondatabase/serverless": ">=0.10.0",
-    "postgres": ">=3.4.0"
+    "postgres": ">=3.4.0",
+    "drizzle-orm": ">=1.0.0-rc.4 <2"
   },
   "peerDependenciesMeta": {
     "@neondatabase/serverless": {
@@ -73,6 +73,7 @@
     "@electric-sql/pglite": "0.3.14",
     "@types/bun": "1.3.14",
     "prettier": "3.8.1",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "drizzle-orm": "1.0.0-rc.4"
   }
 }
