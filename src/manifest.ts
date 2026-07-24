@@ -33,7 +33,7 @@ export const manifest =
           peers: [
             {
               name: "drizzle-orm",
-              range: ">=1.0.0-rc.4",
+              range: ">=1.0.0-rc.4 <2",
               reason: "Schema-derived Postgres persistence",
             },
           ],
@@ -73,7 +73,7 @@ export const manifest =
           peers: [
             {
               name: "@neondatabase/serverless",
-              range: ">=0.10.0",
+              range: ">=1.1.0 <2",
               reason: "HTTP Postgres client for serverless environments",
             },
           ],
